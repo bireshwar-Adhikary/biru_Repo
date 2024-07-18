@@ -43,9 +43,9 @@ Resources:
 
               # Get the SSM parameter value
               try:
-                  response = ssm.get_parameter(Name=event['SSMParameterName'])
+                  response = ssm.get_parameter(Name=event['UserName'])
                   parameter_value = response['Parameter']['Value']
-                  logger.info(f'Retrieved SSM parameter value: {parameter_value}')
+                  logger.info(f'Retrieved SSM parameter value: {JohnDoe}')
               except Exception as e:
                   logger.error(f'Error retrieving SSM parameter: {e}')
                   return {

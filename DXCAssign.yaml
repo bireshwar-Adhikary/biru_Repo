@@ -1,0 +1,123 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Copy SSM Parameter to S3 Bucket
+
+  # Create an SSM Parameter
+  UserNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: UserName
+      Type: String
+      Value: JohnDoe
+
+Resources:
+  # Create an SSM Parameter
+  UserNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: UserName
+      Type: String
+      Value: JohnDoe
+
+  CopySSMParameterToS3Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: CopySSMParameterToS3
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import logging
+
+          # Set up logging
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              logger.info('Starting the CopySSMParameterToS3 function')
+
+              ssm = boto3.client('ssm')
+              s3 = boto3.client('s3')
+
+              # Get the SSM parameter value
+              try:
+                  response = ssm.get_parameter(Name=event['SSMParameterName'])
+                  parameter_value = response['Parameter']['Value']
+                  logger.info(f'Retrieved SSM parameter value: {parameter_value}')
+              except Exception as e:
+                  logger.error(f'Error retrieving SSM parameter: {e}')
+                  return {
+                      'Status': 'FAILED',
+                      'Reason': f'Error retrieving SSM parameter: {e}',
+                      'PhysicalResourceId': context.log_stream_name,
+                      'StackId': event['StackId'],
+                      'RequestId': event['RequestId'],
+                      'LogicalResourceId': event['LogicalResourceId']
+                  }
+
+              # Write the parameter value to an S3 object
+              try:
+                  s3.put_object(Bucket='my-ssm-parameter-bucket', Key='ssm_parameter.txt', Body=parameter_value)
+                  logger.info('Wrote SSM parameter value to S3 object')
+              except Exception as e:
+                  logger.error(f'Error writing to S3 object: {e}')
+                  return {
+                      'Status': 'FAILED',
+                      'Reason': f'Error writing to S3 object: {e}',
+                      'PhysicalResourceId': context.log_stream_name,
+                      'StackId': event['StackId'],
+                      'RequestId': event['RequestId'],
+                      'LogicalResourceId': event['LogicalResourceId']
+                  }
+
+              # Return a success response
+              return {
+                  'Status': 'SUCCESS',
+                  'Reason': 'SSM parameter copied to S3 bucket',
+                  'PhysicalResourceId': context.log_stream_name,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': {
+                      'BucketName': 'my-ssm-parameter-bucket',
+                      'ObjectKey': 'ssm_parameter.txt'
+                  }
+              }
+
+      Environment:
+        Variables:
+          SSM_PARAMETER_NAME: !Ref SSMParameterName
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CopySSMParameterToS3Policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ssm:GetParameter'
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${SSMParameterName}'
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                Resource: 'arn:aws:s3:::my-ssm-parameter-bucket/*'
+
+    # Create a custom resource to trigger the Lambda function
+  CustomResource:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt CopySSMParameterToS3.Arn

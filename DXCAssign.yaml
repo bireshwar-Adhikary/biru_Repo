@@ -1,14 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Copy SSM Parameter to S3 Bucket
 
-  # Create an SSM Parameter
-  UserNameParameter:
-    Type: AWS::SSM::Parameter
-    Properties:
-      Name: UserName
-      Type: String
-      Value: JohnDoe
-
 Resources:
   # Create an SSM Parameter
   UserNameParameter:
@@ -17,6 +9,40 @@ Resources:
       Name: UserName
       Type: String
       Value: JohnDoe
+
+  # Create an S3 Bucket
+  MySSMParameterBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: my-ssm-parameter-bucket
+    DependsOn: UserNameParameter
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CopySSMParameterToS3Policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ssm:GetParameter'
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${UserNameParameter}'
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                Resource: 'arn:aws:s3:::my-ssm-parameter-bucket/*'
+    DependsOn: MySSMParameterBucket
 
   CopySSMParameterToS3Function:
     Type: AWS::Lambda::Function
@@ -45,7 +71,7 @@ Resources:
               try:
                   response = ssm.get_parameter(Name=event['UserName'])
                   parameter_value = response['Parameter']['Value']
-                  logger.info(f'Retrieved SSM parameter value: {JohnDoe}')
+                  logger.info(f'Retrieved SSM parameter value: {parameter_value}')
               except Exception as e:
                   logger.error(f'Error retrieving SSM parameter: {e}')
                   return {
@@ -88,36 +114,11 @@ Resources:
 
       Environment:
         Variables:
-          SSM_PARAMETER_NAME: !Ref SSMParameterName
+          SSM_PARAMETER_NAME: !Ref UserNameParameter
+    DependsOn: LambdaExecutionRole
 
-  LambdaExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: 'sts:AssumeRole'
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: CopySSMParameterToS3Policy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'ssm:GetParameter'
-                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${SSMParameterName}'
-              - Effect: Allow
-                Action:
-                  - 's3:PutObject'
-                Resource: 'arn:aws:s3:::my-ssm-parameter-bucket/*'
-
-    # Create a custom resource to trigger the Lambda function
   CustomResource:
     Type: AWS::CloudFormation::CustomResource
     Properties:
-      ServiceToken: !GetAtt CopySSMParameterToS3.Arn
+      ServiceToken: !GetAtt CopySSMParameterToS3Function.Arn
+    DependsOn: CopySSMParameterToS3Function
